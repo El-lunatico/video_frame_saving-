@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Stream</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+        #username {
+            margin-bottom: 10px;
+            padding: 8px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        #videoElement {
+            display: none; /* Hide video initially */
+            border: 2px solid #ccc;
+            margin-bottom: 10px;
+        }
+        #container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #startButton {
+            display: block;
+        }
+        #closeButton {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>Camera Stream</h1>
+        <input type="text" id="username" placeholder="Enter your username" required>
+        <button id="startButton">Start Camera</button>
+        <button id="closeButton">Stop Camera</button>
+        <video id="videoElement" autoplay playsinline></video>
+    </div>
+
+    <script>
+        const video = document.getElementById('videoElement');
+        const usernameInput = document.getElementById('username');
+        const startButton = document.getElementById('startButton');
+        const closeButton = document.getElementById('closeButton');
+        let stream = null;  // Store the media stream
+
+        startButton.addEventListener('click', () => {
+            // Ensure the user has entered their username
+            const username = usernameInput.value;
+            if (!username) {
+                alert('Please enter your username.');
+                return;
+            }
+
+            console.log("Username entered:", username);
+
+            // Check if mediaDevices is available
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                // Access the user's webcam
+                navigator.mediaDevices.getUserMedia({ video: true })
+                    .then(function(userStream) {
+                        console.log("Camera access granted.");
+                        stream = userStream;  // Store the stream
+                        video.srcObject = stream;
+                        video.style.display = 'block';  // Show the video element
+                        startButton.style.display = 'none';  // Hide start button
+                        closeButton.style.display = 'block';  // Show close button
+
+                        // Capture frames and send to server every second
+                        setInterval(() => {
+                            captureFrameAndSend(username);
+                        }, 1000);  // 1 second interval
+                    })
+                    .catch(function(err) {
+                        console.error("Error accessing camera: ", err);
+                        alert("Camera access denied or error occurred. Please check your browser settings.");
+                    });
+            } else {
+                console.error("getUserMedia is not supported by this browser.");
+                alert("Your browser does not support accessing the camera. Please try a modern browser (Chrome, Firefox, Edge).");
+            }
+        });
+
+        closeButton.addEventListener('click', () => {
+            if (stream) {
+                // Stop all tracks on the stream
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;  // Clear the video element source
+                video.style.display = 'none';  // Hide the video element
+                startButton.style.display = 'block';  // Show start button
+                closeButton.style.display = 'none';  // Hide close button
+                console.log("Camera stopped.");
+            } else {
+                alert("No camera is currently active.");
+            }
+        });
+
+        async function captureFrameAndSend(username) {
+            // Create a canvas to capture the frame
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Convert the canvas to a Blob (image)
+            canvas.toBlob(async (blob) => {
+                // Prepare form data
+                const formData = new FormData();
+                formData.append('image', blob, 'frame.jpg');
+                formData.append('username', username);
+
+                console.log("Sending frame to server...");
+
+                // Send the frame to the server
+                try {
+                    await fetch('/upload_frame', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    console.log("Frame sent successfully.");
+                } catch (error) {
+                    console.error("Error sending frame to server:", error);
+                }
+            }, 'image/jpeg');
+        }
+    </script>
+</body>
+</html>
