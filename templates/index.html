@@ -39,11 +39,33 @@
             flex-direction: column;
             align-items: center;
         }
-        #startButton {
-            display: block;
+        #startButton, #stopButton, #flipButton {
+            display: none; /* Hide buttons initially */
         }
-        #closeButton {
-            display: none;
+        #timer {
+            display: none; /* Hide timer initially */
+            margin-top: 10px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        #savedFramesContainer {
+            display: none; /* Hide saved frames container initially */
+            margin-top: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .snapshot {
+            display: inline-block;
+            margin: 5px;
+            border: 2px solid #ccc;
+            width: 100px;
+            height: 100px;
+        }
+        .snapshot img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
     </style>
 </head>
@@ -51,44 +73,100 @@
     <div id="container">
         <h1>Camera Stream</h1>
         <input type="text" id="username" placeholder="Enter your username" required>
-        <button id="startButton">Start Camera</button>
-        <button id="closeButton">Stop Camera</button>
+        <button id="submitButton">Submit</button>
+        <button id="startButton">Start Recording</button>
+        <button id="stopButton">Stop Recording</button>
+        <button id="flipButton">Flip Camera</button>
         <video id="videoElement" autoplay playsinline></video>
+        <div id="timer">15s</div>
+        <div id="savedFramesContainer"></div> <!-- Container for displaying saved frames -->
     </div>
 
     <script>
         const video = document.getElementById('videoElement');
         const usernameInput = document.getElementById('username');
+        const submitButton = document.getElementById('submitButton');
         const startButton = document.getElementById('startButton');
-        const closeButton = document.getElementById('closeButton');
-        let stream = null;  // Store the media stream
+        const stopButton = document.getElementById('stopButton');
+        const flipButton = document.getElementById('flipButton');
+        const timerDisplay = document.getElementById('timer');
+        const savedFramesContainer = document.getElementById('savedFramesContainer');
 
-        startButton.addEventListener('click', () => {
-            // Ensure the user has entered their username
+        let stream = null;  // Store the media stream
+        let timerInterval = null;
+        let recording = false;
+        let facingMode = 'user';  // Default to the front camera
+        let sessionId = null;
+
+        submitButton.addEventListener('click', () => {
             const username = usernameInput.value;
             if (!username) {
                 alert('Please enter your username.');
                 return;
             }
 
-            console.log("Username entered:", username);
+            // Show start button after submit
+            startButton.style.display = 'inline';
+            stopButton.style.display = 'none';
+            flipButton.style.display = 'inline';
+            submitButton.style.display = 'none';
+            
+            // Open the camera but do not start recording
+            startCameraStream();
+        });
 
-            // Check if mediaDevices is available
+        startButton.addEventListener('click', () => {
+            if (!stream) {
+                alert('Please submit username first to access the camera.');
+                return;
+            }
+
+            startButton.style.display = 'none';
+            stopButton.style.display = 'block';
+            flipButton.style.display = 'none'; // Hide flip button while recording
+            timerDisplay.style.display = 'block';  // Show the timer
+
+            if (!recording) {
+                startRecording(usernameInput.value);
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                video.style.display = 'none';
+                startButton.style.display = 'block';
+                stopButton.style.display = 'none';
+                flipButton.style.display = 'inline'; // Show flip button again
+                timerDisplay.style.display = 'none';  // Hide the timer
+                clearInterval(timerInterval);
+                timerDisplay.textContent = '15s';
+                console.log("Camera stopped.");
+
+                // Display saved frames when recording stops
+                const username = usernameInput.value;
+                displaySavedFrames(username, sessionId);
+            } else {
+                alert("No camera is currently active.");
+            }
+        });
+
+        flipButton.addEventListener('click', () => {
+            facingMode = facingMode === 'user' ? 'environment' : 'user';
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop()); // Stop current stream
+                startCameraStream(); // Start new stream with updated facing mode
+            }
+        });
+
+        function startCameraStream() {
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                // Access the user's webcam
-                navigator.mediaDevices.getUserMedia({ video: true })
+                navigator.mediaDevices.getUserMedia({ video: { facingMode } })
                     .then(function(userStream) {
-                        console.log("Camera access granted.");
-                        stream = userStream;  // Store the stream
+                        stream = userStream;
                         video.srcObject = stream;
-                        video.style.display = 'block';  // Show the video element
-                        startButton.style.display = 'none';  // Hide start button
-                        closeButton.style.display = 'block';  // Show close button
-
-                        // Capture frames and send to server every second
-                        setInterval(() => {
-                            captureFrameAndSend(username);
-                        }, 1000);  // 1 second interval
+                        video.style.display = 'block';
                     })
                     .catch(function(err) {
                         console.error("Error accessing camera: ", err);
@@ -98,40 +176,48 @@
                 console.error("getUserMedia is not supported by this browser.");
                 alert("Your browser does not support accessing the camera. Please try a modern browser (Chrome, Firefox, Edge).");
             }
-        });
+        }
 
-        closeButton.addEventListener('click', () => {
-            if (stream) {
-                // Stop all tracks on the stream
-                stream.getTracks().forEach(track => track.stop());
-                video.srcObject = null;  // Clear the video element source
-                video.style.display = 'none';  // Hide the video element
-                startButton.style.display = 'block';  // Show start button
-                closeButton.style.display = 'none';  // Hide close button
-                console.log("Camera stopped.");
-            } else {
-                alert("No camera is currently active.");
-            }
-        });
+        function startRecording(username) {
+            recording = true;
+            sessionId = new Date().toISOString(); // Unique session ID based on timestamp
+            let timeLeft = 15;
 
-        async function captureFrameAndSend(username) {
-            // Create a canvas to capture the frame
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                timerDisplay.textContent = `${timeLeft}s`;
+
+                if (timeLeft <= 0) {
+                    stopButton.click();
+                }
+            }, 1000);
+
+            const captureInterval = setInterval(() => {
+                captureFrameAndSend(username, sessionId);
+            }, 100);
+
+            stopButton.addEventListener('click', () => {
+                clearInterval(captureInterval);
+                // Display saved frames when recording stops
+                displaySavedFrames(username, sessionId);
+            });
+        }
+
+        async function captureFrameAndSend(username, sessionId) {
             const canvas = document.createElement('canvas');
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // Convert the canvas to a Blob (image)
             canvas.toBlob(async (blob) => {
-                // Prepare form data
                 const formData = new FormData();
                 formData.append('image', blob, 'frame.jpg');
                 formData.append('username', username);
+                formData.append('session_id', sessionId); // Include session ID
 
                 console.log("Sending frame to server...");
 
-                // Send the frame to the server
                 try {
                     await fetch('/upload_frame', {
                         method: 'POST',
@@ -142,6 +228,24 @@
                     console.error("Error sending frame to server:", error);
                 }
             }, 'image/jpeg');
+        }
+
+        async function displaySavedFrames(username, sessionId) {
+            try {
+                savedFramesContainer.style.display = 'flex'; // Show saved frames container
+                const response = await fetch(`/get_frames?username=${username}&session_id=${sessionId}`);
+                const frames = await response.json();
+                savedFramesContainer.innerHTML = ''; // Clear previous frames
+
+                frames.forEach(frame => {
+                    const img = document.createElement('img');
+                    img.src = frame.url;
+                    img.classList.add('snapshot');
+                    savedFramesContainer.appendChild(img);
+                });
+            } catch (error) {
+                console.error("Error fetching saved frames:", error);
+            }
         }
     </script>
 </body>
